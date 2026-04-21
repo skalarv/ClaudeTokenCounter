@@ -1,50 +1,82 @@
 # TokenFollow
 
-Always-on-top Windows overlay that shows your current Claude Code
-token consumption and GPU utilization.
+An always-on-top Windows overlay that shows your Claude Code token usage and
+GPU utilisation in real time.  Four progress bars update every 10 seconds:
+the current 5-hour session, weekly Opus usage, weekly Sonnet+Haiku usage, and
+GPU load — each colour-coded green / amber / red as you approach your limits.
 
-Four rows:
+```
++------------------------------------------+
+|  5h window   23.4M / 88.0M  · resets in 2h 14m  |
+|  [==========================================>   ] |
+|  Week · Opus  14.1M / 70.0M · resets in 4d 3h   |
+|  [=========================                    ] |
+|  Week · Sonnet 88.2M / 440M · resets in 4d 3h   |
+|  [=========                                   ] |
+|  GPU   47 %                                      |
+|  [========================                     ] |
++------------------------------------------+
+```
 
-1. **5h window** — tokens used in the current 5-hour Claude session and
-   when it resets.
-2. **Week · Opus** — Opus tokens used in the last 7 days.
-3. **Week · Sonnet** — Sonnet + Haiku tokens used in the last 7 days.
-4. **GPU** — current GPU utilization (auto-detects `nvidia-smi`; falls
-   back to Windows GPU performance counters for AMD/Intel).
+---
 
-## Run
+## Install
+
+Full instructions: [docs/INSTALL.md](docs/INSTALL.md)
+
+**One-step install:** double-click `install.bat`.
+
+It checks Python 3.8+, verifies tkinter, installs test dependencies, and
+creates a Desktop shortcut — all in one go.
+
+---
+
+## Use
+
+Double-click the **TokenFollow** Desktop shortcut, or run:
 
 ```
 python token_follow.py
 ```
 
-or double-click `TokenFollow.bat`. To launch from the desktop, copy
-`TokenFollow.bat` there or right-click → Send to → Desktop (create
-shortcut).
+Full usage guide (window rows, config keys, GPU source selection, resetting
+budgets): [docs/USAGE.md](docs/USAGE.md)
 
-## Tune
+---
 
-`config.json` is created on first run and is hand-editable. Raise the
-default budgets if you want the bars to calibrate against a higher
-estimate; the script also auto-bumps any observed maximum, so the bars
-can never exceed 100 %.
+## Architecture
 
-## Tests
+JSONL logs flow from `~/.claude/projects/` through `UsageParser` →
+`aggregate()` → `OverlayWindow`; `GPUMonitor` feeds GPU utilisation into the
+same `Snapshot`.  The package is split into five focused modules so the 97%+
+branch-coverage gate can be met with fast, isolated unit tests.
+
+Full diagram and design decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+---
+
+## Test
 
 ```
 run_tests.bat
 ```
 
-Requires the dev extras: `pip install pytest pytest-cov`.
+Runs pytest with coverage (≥ 97% required) then the bidirectional feature-
+matrix check.  Requires `pip install pytest pytest-cov` (done automatically by
+`install.bat`).
 
-Python 3.8+ with `tkinter` is required at runtime; `tkinter` ships with
-the standard Windows Python installer but is absent from some slim
-distributions (conda minimal envs, the Microsoft Store Python).
+---
 
-## Files
+## Requirements
 
-- `token_follow.py` — entry point
-- `tokenfollow/` — package (parser, aggregator, budget, gpu, ui)
-- `config.json`, `cache.json` — auto-generated at runtime
-- `tests/` — pytest suite, coverage = 100 %
-- `docs/superpowers/` — spec + plan
+| Item | Minimum |
+|---|---|
+| OS | Windows 10 (1903+) / Windows 11 |
+| Python | 3.8+ with `tkinter` (use the official [python.org](https://www.python.org/downloads/) installer) |
+| Claude Code | Any version — `~/.claude/projects/` must exist |
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

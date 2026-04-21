@@ -1,3 +1,10 @@
+"""budget — persists and exposes user-editable token budgets via ``config.json``.
+
+Inputs: ``config.json`` next to the entry-point script (created with
+:data:`DEFAULTS` when absent or corrupted).
+Outputs: budget / observed / weight mappings consumed by
+:func:`~tokenfollow.aggregator.aggregate`, plus window-position persistence.
+"""
 from __future__ import annotations
 
 import json
@@ -32,6 +39,7 @@ class BudgetManager:
         self._data = self._load_or_init()
 
     def _load_or_init(self) -> Dict:
+        """Load ``config.json``, creating or restoring it from defaults if needed."""
         if not self._path.exists():
             data = _deepcopy(DEFAULTS)
             self._write(data)
@@ -46,13 +54,16 @@ class BudgetManager:
         return _merge_defaults(data, DEFAULTS)
 
     def _write(self, data: Dict) -> None:
+        """Serialise *data* to ``config.json`` (pretty-printed)."""
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def save(self) -> None:
+        """Flush the current in-memory config to disk."""
         self._write(self._data)
 
     @property
     def budgets(self) -> Dict[str, int]:
+        """Default token ceilings keyed by ``"5h"``, ``"week_opus"``, ``"week_sonnet"``."""
         d = self._data["defaults"]
         return {"5h": d["5h_tokens"],
                 "week_opus": d["week_opus_tokens"],
@@ -60,6 +71,7 @@ class BudgetManager:
 
     @property
     def observed(self) -> Dict[str, int]:
+        """Auto-learned maximum token counts (same keys as :attr:`budgets`)."""
         o = self._data["observed_max"]
         return {"5h": o["5h_tokens"],
                 "week_opus": o["week_opus_tokens"],
@@ -67,23 +79,32 @@ class BudgetManager:
 
     @property
     def weights(self) -> Dict[str, float]:
+        """Token-weight multipliers, e.g. ``{"cache_read": 0.1}``."""
         return dict(self._data["weights"])
 
     @property
     def refresh_seconds(self) -> int:
+        """Polling interval in seconds (default 10)."""
         return int(self._data["refresh_seconds"])
 
     @property
     def window_position(self):
+        """Last saved ``(x, y)`` screen coordinates, or ``(None, None)``."""
         w = self._data["window"]
         return (w.get("x"), w.get("y"))
 
     def save_position(self, x: Optional[int], y: Optional[int]) -> None:
+        """Persist the overlay's screen coordinates to ``config.json``."""
         self._data["window"]["x"] = x
         self._data["window"]["y"] = y
         self._write(self._data)
 
     def maybe_bump(self, snap: Snapshot) -> bool:
+        """Update ``observed_max`` if any window in *snap* exceeds the stored peak.
+
+        Returns:
+            ``True`` if at least one value was bumped and the file was written.
+        """
         changed = False
         pairs = [
             ("5h_tokens", snap.five_hour.used),
@@ -100,10 +121,12 @@ class BudgetManager:
 
 
 def _deepcopy(obj):
+    """JSON-round-trip deep copy (no external deps required)."""
     return json.loads(json.dumps(obj))
 
 
 def _merge_defaults(data, defaults):
+    """Recursively fill any missing keys in *data* from *defaults*."""
     if not isinstance(defaults, dict):
         return data if data is not None else defaults
     out = dict(defaults)

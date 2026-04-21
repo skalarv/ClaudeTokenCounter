@@ -1,4 +1,11 @@
-"""TokenFollow — always-on-top Claude Code usage + GPU overlay."""
+"""TokenFollow — always-on-top Claude Code usage + GPU overlay.
+
+Entry point: call :func:`main` (or run this file directly).  Reads JSONL logs
+from ``~/.claude/projects/``, aggregates token usage into three rolling
+windows, polls the GPU, and drives the :class:`~tokenfollow.ui.OverlayWindow`
+Tk event loop.  Window position and observed-max budgets are persisted to
+``config.json`` / ``cache.json`` next to this file on close.
+"""
 from __future__ import annotations
 
 import logging
@@ -17,6 +24,13 @@ CLAUDE_PROJECTS_ROOT = Path.home() / ".claude" / "projects"
 
 
 def main() -> None:
+    """Bootstrap all subsystems and start the Tk main loop.
+
+    Creates :class:`~tokenfollow.budget.BudgetManager`,
+    :class:`~tokenfollow.parser.UsageParser`, and
+    :class:`~tokenfollow.gpu.GPUMonitor`, then enters a recurring ``tick``
+    callback that updates the overlay every ``refresh_seconds``.
+    """
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
     bm = BudgetManager(HERE / "config.json")
     parser = UsageParser(CLAUDE_PROJECTS_ROOT)

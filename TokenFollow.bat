@@ -1,2 +1,3 @@
 @echo off
-start "" pythonw "G:\GitWorkSpace\TokenFollow\token_follow.py"
+rem Self-relocating launcher: resolves alongside this .bat file.
+start "" pythonw "%~dp0token_follow.py"

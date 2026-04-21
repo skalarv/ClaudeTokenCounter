@@ -1,3 +1,10 @@
+"""ui — tkinter-based always-on-top overlay window for TokenFollow.
+
+Provides three pure helpers (:func:`band_color`, :func:`_fmt_tokens`,
+:func:`_fmt_delta`) that convert numeric values to display strings / colours,
+and :class:`OverlayWindow` which owns all Tk state and renders four rows
+(5h window, Week · Opus, Week · Sonnet, GPU) on every :meth:`~OverlayWindow.update` call.
+"""
 from __future__ import annotations
 
 import tkinter as tk
@@ -14,6 +21,14 @@ BAND_RED = "#c0392b"
 
 
 def band_color(fraction: float) -> str:
+    """Return the hex colour for a fill fraction: green < 0.60, amber ≤ 0.85, red above.
+
+    Args:
+        fraction: A value in [0, 1] representing how full the budget is.
+
+    Returns:
+        One of :data:`BAND_GREEN`, :data:`BAND_AMBER`, or :data:`BAND_RED`.
+    """
     if fraction < 0.60:
         return BAND_GREEN
     if fraction <= 0.85:
@@ -22,6 +37,7 @@ def band_color(fraction: float) -> str:
 
 
 def _fmt_tokens(n: int) -> str:
+    """Format a token count as a compact string: ``"1.2M"``, ``"34.5K"``, or the raw number."""
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f}M"
     if n >= 1_000:
@@ -30,6 +46,7 @@ def _fmt_tokens(n: int) -> str:
 
 
 def _fmt_delta(target: Optional[datetime], now: datetime) -> str:
+    """Return a human-readable countdown to *target*, ``"idle"``, or ``"resetting…"``."""
     if target is None:
         return "idle"
     total = int((target - now).total_seconds())
@@ -50,6 +67,14 @@ class OverlayWindow:
 
     def __init__(self, *, root: Optional[tk.Tk] = None,
                  on_close: Callable[[], None]):
+        """Create and configure the overlay window.
+
+        Args:
+            root: An existing ``tk.Tk`` instance (useful in tests); a new one
+                is created when omitted.
+            on_close: Called before the window is destroyed so callers can
+                persist state (position, cache offsets, etc.).
+        """
         self.root = root or tk.Tk()
         self.root.title("TokenFollow")
         self.root.geometry("340x220")
@@ -78,6 +103,7 @@ class OverlayWindow:
         self.root.grid_columnconfigure(0, weight=1)
 
     def update(self, snap: Snapshot) -> None:
+        """Refresh all four rows from *snap*."""
         self._render_token("five_hour", "5h window", snap.five_hour, snap.now)
         self._render_token("week_opus", "Week · Opus", snap.week_opus, snap.now)
         self._render_token("week_sonnet", "Week · Sonnet", snap.week_sonnet, snap.now)
@@ -112,6 +138,7 @@ class OverlayWindow:
         self._labels[key]["text"] = f"GPU   {percent} %"
 
     def label_texts(self) -> Dict[str, str]:
+        """Return a ``{key: label_text}`` dict for all four rows (test helper)."""
         return {k: lab["text"] for k, lab in self._labels.items()}
 
     def _on_map(self, _event) -> None:
@@ -124,11 +151,13 @@ class OverlayWindow:
             self.root.destroy()
 
     def restore_position(self, pos) -> None:
+        """Move the window to *pos* ``(x, y)``; no-op if either coordinate is ``None``."""
         x, y = pos
         if x is not None and y is not None:
             self.root.geometry(f"+{int(x)}+{int(y)}")
 
     def current_position(self):
+        """Return the current ``(x, y)`` screen position, or ``(None, None)`` if unreadable."""
         geom = self.root.geometry()
         try:
             coords = geom.split("+")

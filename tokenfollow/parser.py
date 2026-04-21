@@ -1,3 +1,9 @@
+"""parser — reads Claude Code JSONL conversation logs and extracts token-usage records.
+
+Inputs: ``~/.claude/projects/**/*.jsonl`` (one JSON object per line).
+Outputs: a list of :class:`UsageRecord` instances, accumulated in memory and
+returned on each :meth:`UsageParser.scan` call.
+"""
 from __future__ import annotations
 
 import json
@@ -9,6 +15,12 @@ from typing import Dict, List
 
 @dataclass(frozen=True)
 class UsageRecord:
+    """Immutable snapshot of token counts from one assistant turn.
+
+    All token counts are raw integers as reported by the API; ``cache_read``
+    is discounted by ``weights.cache_read`` only during aggregation.
+    """
+
     ts: datetime
     model: str
     input: int
@@ -18,6 +30,7 @@ class UsageRecord:
 
 
 def _parse_ts(raw: str) -> datetime:
+    """Normalise a raw ISO-8601 timestamp string to an aware UTC datetime."""
     # Accept both "...Z" and "...+00:00"
     if raw.endswith("Z"):
         raw = raw[:-1] + "+00:00"
@@ -63,11 +76,24 @@ class UsageParser:
     """
 
     def __init__(self, projects_root: Path):
+        """
+        Args:
+            projects_root: Path to the ``~/.claude/projects/`` directory.
+        """
         self._root = Path(projects_root)
         self._offsets: Dict[Path, int] = {}
         self._records: List[UsageRecord] = []
 
     def scan(self) -> List[UsageRecord]:
+        """Scan all ``.jsonl`` files for new bytes and return the full accumulated record list.
+
+        Only bytes past the stored file offset are read; if a file shrinks
+        (log rotation) the offset resets to 0 and the file is re-read.
+
+        Returns:
+            A sorted (ascending ``ts``) list of every :class:`UsageRecord`
+            seen since the parser was created.
+        """
         if not self._root.exists():
             return list(self._records)
         for path in sorted(self._root.rglob("*.jsonl")):

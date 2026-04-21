@@ -1,3 +1,11 @@
+"""aggregator — groups UsageRecord lists into budget-aware window snapshots.
+
+Inputs: a list of :class:`~tokenfollow.parser.UsageRecord` objects plus budget
+and weight configuration mappings.
+Outputs: a :class:`Snapshot` dataclass suitable for direct consumption by the
+UI layer.  The pure :func:`aggregate` function accepts ``now`` as an explicit
+parameter so that tests can remain fully deterministic.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +21,12 @@ ONE_WEEK = timedelta(days=7)
 
 @dataclass
 class WindowSnapshot:
+    """Token counts for one measurement window (5-hour or 7-day).
+
+    ``budget`` is always >= ``used`` (hybrid max of default / observed / used),
+    so the fractional fill ``used / budget`` is always in [0, 1].
+    """
+
     used: int
     budget: int
     resets_at: Optional[datetime]
@@ -21,6 +35,12 @@ class WindowSnapshot:
 
 @dataclass
 class Snapshot:
+    """Complete state for one overlay refresh cycle.
+
+    ``gpu_percent`` is set by the caller after :func:`aggregate` returns;
+    it is ``None`` when no GPU source is available.
+    """
+
     five_hour: WindowSnapshot
     week_opus: WindowSnapshot
     week_sonnet: WindowSnapshot
@@ -29,11 +49,13 @@ class Snapshot:
 
 
 def _counted(rec: UsageRecord, weights: Mapping[str, float]) -> int:
+    """Return the weighted token count for a single record."""
     cr = weights.get("cache_read", 0.1)
     return int(rec.input + rec.cache_create + round(rec.cache_read * cr) + rec.output)
 
 
 def _family(model: str) -> str:
+    """Map a model string to ``"opus"``, ``"sonnet"``, ``"haiku"``, or ``"other"``."""
     if model.startswith("claude-opus"):
         return "opus"
     if model.startswith("claude-sonnet"):
@@ -65,6 +87,20 @@ def aggregate(records: List[UsageRecord],
               observed: Mapping[str, int],
               now: datetime,
               weights: Mapping[str, float]) -> Snapshot:
+    """Build a :class:`Snapshot` from the full record history up to *now*.
+
+    Args:
+        records: All usage records (order does not matter; sorted internally).
+        budgets: Default ceiling tokens keyed by ``"5h"``, ``"week_opus"``,
+            ``"week_sonnet"``.
+        observed: Previously observed maxima (same keys as *budgets*).
+        now: Reference timestamp; must be timezone-aware UTC.
+        weights: Token-weight overrides, e.g. ``{"cache_read": 0.1}``.
+
+    Returns:
+        A fully-populated :class:`Snapshot`.  ``gpu_percent`` is left as
+        ``None``; the caller sets it after aggregation.
+    """
     records = sorted(records, key=lambda r: r.ts)
 
     anchor, win_records = _current_5h_window(records, now)

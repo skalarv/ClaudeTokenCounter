@@ -1,3 +1,10 @@
+"""gpu — polls GPU utilisation via nvidia-smi or Windows performance counters.
+
+Source selection happens once at construction; if neither probe succeeds,
+:attr:`GPUMonitor.source` is set to ``"none"`` and :meth:`GPUMonitor.read`
+always returns ``None``.  A last-good value is returned when a probe
+temporarily fails after an initial success.
+"""
 from __future__ import annotations
 
 import subprocess
@@ -21,11 +28,18 @@ _TIMEOUT_S = 1.5
 
 
 class GPUMonitor:
+    """Detects and queries the best available GPU utilisation source.
+
+    ``source`` is set to ``"nvidia-smi"``, ``"perfcounter"``, or ``"none"``
+    at construction and does not change thereafter.
+    """
+
     def __init__(self) -> None:
         self._last_good: Optional[int] = None
         self.source = self._detect_source()
 
     def _detect_source(self) -> str:
+        """Try each probe in preference order and return the first that works."""
         if self._try(NVIDIA_CMD) is not None:
             return "nvidia-smi"
         if self._try(PERFCOUNTER_CMD) is not None:
@@ -33,6 +47,7 @@ class GPUMonitor:
         return "none"
 
     def _try(self, cmd) -> Optional[int]:
+        """Run *cmd* and return the parsed integer result, or ``None`` on any failure."""
         try:
             cp = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=_TIMEOUT_S, check=False)
@@ -58,6 +73,11 @@ class GPUMonitor:
         return int(round(max(0.0, min(100.0, max(vals)))))
 
     def read(self) -> Optional[int]:
+        """Return current GPU utilisation (0–100), last-good value, or ``None``.
+
+        ``None`` is returned only when :attr:`source` is ``"none"`` or when
+        the probe has never succeeded.
+        """
         if self.source == "none":
             return None
         cmd = NVIDIA_CMD if self.source == "nvidia-smi" else PERFCOUNTER_CMD
