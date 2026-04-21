@@ -90,10 +90,7 @@ class UsageParser:
             for raw in data.splitlines():
                 if not raw.strip():
                     continue
-                try:
-                    line = raw.decode("utf-8", errors="replace")
-                except UnicodeDecodeError:        # pragma: no cover
-                    continue
+                line = raw.decode("utf-8", errors="replace")
                 rec = parse_line(line)
                 if rec is not None:
                     self._records.append(rec)

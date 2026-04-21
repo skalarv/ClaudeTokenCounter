@@ -26,7 +26,6 @@ def main() -> None:
         x, y = win.current_position()
         bm.save_position(x, y)
         parser.save_cache(HERE / "cache.json")
-        bm.save()
 
     win = OverlayWindow(on_close=on_close)
     win.restore_position(bm.window_position)

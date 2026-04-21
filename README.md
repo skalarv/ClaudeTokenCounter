@@ -35,7 +35,11 @@ can never exceed 100 %.
 run_tests.bat
 ```
 
-Requires the dev extras: `pip install pytest pytest-cov freezegun`.
+Requires the dev extras: `pip install pytest pytest-cov`.
+
+Python 3.8+ with `tkinter` is required at runtime; `tkinter` ships with
+the standard Windows Python installer but is absent from some slim
+distributions (conda minimal envs, the Microsoft Store Python).
 
 ## Files
 

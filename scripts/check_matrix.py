@@ -1,4 +1,9 @@
-"""Enforce the feature matrix: every listed test id must be collected by pytest."""
+"""Enforce the feature matrix bidirectionally.
+
+1. Every test id listed in FEATURE_MATRIX.md must be collected by pytest.
+2. Every test id collected by pytest must appear in FEATURE_MATRIX.md
+   OR carry the `@pytest.mark.matrix_exempt` marker.
+"""
 from __future__ import annotations
 
 import re
@@ -11,13 +16,13 @@ ROOT = Path(__file__).resolve().parent.parent
 MATRIX = ROOT / "tests" / "FEATURE_MATRIX.md"
 
 
-def main() -> int:
-    text = MATRIX.read_text(encoding="utf-8")
-    ids = set(re.findall(r"tests/[\w/]+\.py::[\w_]+", text))
-    if not ids:
-        print("no test ids found in matrix")
-        return 2
+def _normalize(line: str) -> str:
+    if "[" in line:
+        line = line.split("[", 1)[0]
+    return line.replace("\\", "/").strip()
 
+
+def _collect_all() -> set[str]:
     cp = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only"],
         cwd=str(ROOT), capture_output=True, text=True, check=False,
@@ -25,30 +30,60 @@ def main() -> int:
     if cp.returncode not in (0, 5):
         print(cp.stdout)
         print(cp.stderr, file=sys.stderr)
-        return cp.returncode
+        raise SystemExit(cp.returncode)
+    out = set()
+    for raw in cp.stdout.splitlines():
+        s = _normalize(raw)
+        if "::" in s:
+            out.add(s)
+    return out
 
-    # pytest --collect-only -q outputs one line per test id, possibly with
-    # parametrization suffix [param]. We strip the [param] suffix when
-    # comparing matrix ids (which name the function, not parametrization).
-    collected = set()
-    for line in cp.stdout.splitlines():
-        line = line.strip()
-        if "::" not in line:
-            continue
-        # Drop any " " or "[" annotation
-        if "[" in line:
-            line = line.split("[", 1)[0]
-        # On Windows, pytest may use forward slashes already; normalize anyway
-        line = line.replace("\\", "/")
-        collected.add(line)
 
-    missing = sorted(tid for tid in ids if tid not in collected)
-    if missing:
-        print("MATRIX: missing tests:")
-        for m in missing:
+def _collect_exempt() -> set[str]:
+    cp = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only",
+         "-m", "matrix_exempt"],
+        cwd=str(ROOT), capture_output=True, text=True, check=False,
+    )
+    # Exit 5 = no tests selected, treat as empty.
+    if cp.returncode not in (0, 5):
+        # Unknown mark warnings still print; only treat hard errors as fatal.
+        print(cp.stderr, file=sys.stderr)
+    out = set()
+    for raw in cp.stdout.splitlines():
+        s = _normalize(raw)
+        if "::" in s:
+            out.add(s)
+    return out
+
+
+def main() -> int:
+    text = MATRIX.read_text(encoding="utf-8")
+    matrix_ids = set(re.findall(r"tests/[\w/]+\.py::[\w_]+", text))
+    if not matrix_ids:
+        print("no test ids found in matrix")
+        return 2
+
+    collected = _collect_all()
+    exempt = _collect_exempt()
+
+    missing_from_collection = sorted(matrix_ids - collected)
+    if missing_from_collection:
+        print("MATRIX: tests listed in matrix but NOT collected by pytest:")
+        for m in missing_from_collection:
             print(f"  {m}")
         return 1
-    print(f"MATRIX: {len(ids)} feature rows, all collected.")
+
+    unaccounted = sorted(collected - matrix_ids - exempt)
+    if unaccounted:
+        print("MATRIX: tests collected but NOT in matrix and not @pytest.mark.matrix_exempt:")
+        for m in unaccounted:
+            print(f"  {m}")
+        return 1
+
+    print(f"MATRIX: {len(matrix_ids)} feature rows, "
+          f"{len(collected)} collected tests, {len(exempt)} exempt — "
+          f"all accounted for.")
     return 0
 
 
