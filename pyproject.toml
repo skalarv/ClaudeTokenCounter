@@ -1,0 +1,12 @@
+[project]
+name = "tokenfollow"
+version = "0.1.0"
+description = "Always-on-top Claude Code usage + GPU overlay for Windows"
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov>=4", "freezegun>=1.2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
