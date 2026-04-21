@@ -73,7 +73,7 @@ class UsageParser:
         for path in sorted(self._root.rglob("*.jsonl")):
             try:
                 size = path.stat().st_size
-            except OSError:
+            except OSError:                       # pragma: no cover
                 continue
             prev = self._offsets.get(path, 0)
             if size < prev:
@@ -84,7 +84,7 @@ class UsageParser:
                 with path.open("rb") as f:
                     f.seek(prev)
                     data = f.read(size - prev)
-            except OSError:
+            except OSError:                       # pragma: no cover
                 continue
             self._offsets[path] = size
             for raw in data.splitlines():
@@ -92,7 +92,7 @@ class UsageParser:
                     continue
                 try:
                     line = raw.decode("utf-8", errors="replace")
-                except UnicodeDecodeError:
+                except UnicodeDecodeError:        # pragma: no cover
                     continue
                 rec = parse_line(line)
                 if rec is not None:

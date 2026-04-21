@@ -86,3 +86,26 @@ def test_none_source_read_is_none():
     with patch("subprocess.run", side_effect=FileNotFoundError):
         gm = GPUMonitor()
     assert gm.read() is None
+
+
+def test_nvidia_nonzero_returncode_returns_none():
+    fail_cp = MagicMock()
+    fail_cp.returncode = 1
+    fail_cp.stdout = ""
+    with patch("subprocess.run", return_value=fail_cp):
+        gm = GPUMonitor()
+    assert gm.source == "none"
+
+
+def test_parse_skips_empty_lines():
+    # Empty lines between values should not break parsing.
+    with patch("subprocess.run", return_value=_ok("\n42\n\n10\n")):
+        gm = GPUMonitor()
+    with patch("subprocess.run", return_value=_ok("\n42\n\n10\n")):
+        assert gm.read() == 42
+
+
+def test_parse_returns_none_on_empty_stdout():
+    with patch("subprocess.run", return_value=_ok("")):
+        gm = GPUMonitor()
+    assert gm.source == "none"

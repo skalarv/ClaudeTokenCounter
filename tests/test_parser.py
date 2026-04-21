@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from tokenfollow.parser import UsageRecord, parse_line
@@ -102,3 +103,68 @@ def test_missing_projects_dir_is_ok(tmp_path: Path):
 def test_empty_projects_dir(projects_root: Path):
     parser = UsageParser(projects_root)
     assert parser.scan() == []
+
+
+def test_naive_timestamp_parsed_as_utc():
+    line = (
+        '{"timestamp":"2026-04-21T10:00:00","message":{"model":"claude-opus-4-7",'
+        '"usage":{"input_tokens":1,"cache_creation_input_tokens":0,'
+        '"cache_read_input_tokens":0,"output_tokens":1}}}'
+    )
+    rec = parse_line(line)
+    assert rec is not None
+    assert rec.ts.tzinfo is not None
+    assert rec.ts == datetime(2026, 4, 21, 10, 0, tzinfo=timezone.utc)
+
+
+def test_unchanged_file_skipped(projects_root: Path):
+    proj = projects_root / "ProjectA"
+    proj.mkdir()
+    f = proj / "session.jsonl"
+    f.write_text(
+        '{"timestamp":"2026-04-21T10:00:00Z","message":{"model":"claude-sonnet-4-6",'
+        '"usage":{"input_tokens":1,"cache_creation_input_tokens":0,'
+        '"cache_read_input_tokens":0,"output_tokens":2}}}\n',
+        encoding="utf-8",
+    )
+    parser = UsageParser(projects_root)
+    first = parser.scan()
+    second = parser.scan()  # exercises the size == prev continue branch
+    assert len(first) == len(second) == 1
+
+
+def test_empty_lines_and_bad_lines_skipped(projects_root: Path):
+    proj = projects_root / "ProjectA"
+    proj.mkdir()
+    f = proj / "session.jsonl"
+    f.write_text(
+        "\n"
+        "{not valid json\n"
+        '{"timestamp":"2026-04-21T10:00:00Z","message":{"model":"claude-sonnet-4-6",'
+        '"usage":{"input_tokens":1,"cache_creation_input_tokens":0,'
+        '"cache_read_input_tokens":0,"output_tokens":2}}}\n'
+        "\n",
+        encoding="utf-8",
+    )
+    parser = UsageParser(projects_root)
+    result = parser.scan()
+    assert len(result) == 1
+
+
+def test_save_cache_writes_offsets(projects_root: Path, tmp_path: Path):
+    proj = projects_root / "ProjectA"
+    proj.mkdir()
+    f = proj / "session.jsonl"
+    f.write_text(
+        '{"timestamp":"2026-04-21T10:00:00Z","message":{"model":"claude-sonnet-4-6",'
+        '"usage":{"input_tokens":1,"cache_creation_input_tokens":0,'
+        '"cache_read_input_tokens":0,"output_tokens":2}}}\n',
+        encoding="utf-8",
+    )
+    parser = UsageParser(projects_root)
+    parser.scan()
+    cache_path = tmp_path / "cache.json"
+    parser.save_cache(cache_path)
+    assert cache_path.exists()
+    data = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert any(str(f) in k or k.endswith("session.jsonl") for k in data)

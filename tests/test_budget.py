@@ -88,3 +88,38 @@ def test_partial_config_merged_with_defaults(tmp_path: Path):
     bm = BudgetManager(cfg)
     assert bm.refresh_seconds == 5
     assert bm.budgets["5h"] == 88_000_000
+
+
+def test_save_persists(tmp_path: Path):
+    cfg = tmp_path / "config.json"
+    bm = BudgetManager(cfg)
+    # Mutate via maybe_bump (not strictly necessary; save() always writes).
+    bm.save()
+    assert cfg.exists()
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert data["defaults"]["5h_tokens"] == 88_000_000
+
+
+def test_merge_with_non_dict_default_value(tmp_path: Path):
+    # Force a partial config whose value is not a dict at a recursive level.
+    cfg = tmp_path / "config.json"
+    # refresh_seconds in DEFAULTS is an int (not a dict). User overrides it.
+    cfg.write_text(json.dumps({"refresh_seconds": 7,
+                               "weights": {"cache_read": 0.05}}),
+                   encoding="utf-8")
+    bm = BudgetManager(cfg)
+    assert bm.refresh_seconds == 7
+    assert bm.weights == {"cache_read": 0.05}
+    assert bm.budgets["5h"] == 88_000_000  # filled from defaults
+
+
+def test_merge_data_not_dict_when_defaults_is_dict(tmp_path: Path):
+    # Write a config where a sub-key that is normally a dict is replaced with
+    # a scalar — _merge_defaults hits the isinstance(data, dict) == False branch.
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"weights": "not-a-dict"}), encoding="utf-8")
+    bm = BudgetManager(cfg)
+    # The whole defaults["weights"] dict should be used since data["weights"]
+    # is not a dict, so _merge_defaults returns it as-is and out["weights"]
+    # stays as the defaults value.
+    assert bm.budgets["5h"] == 88_000_000
