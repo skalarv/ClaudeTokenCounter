@@ -52,7 +52,7 @@ class OverlayWindow:
                  on_close: Callable[[], None]):
         self.root = root or tk.Tk()
         self.root.title("TokenFollow")
-        self.root.geometry("320x180")
+        self.root.geometry("340x220")
         self.root.resizable(False, False)
         self.root.attributes("-topmost", True)
 
@@ -67,11 +67,11 @@ class OverlayWindow:
 
         for i, key in enumerate(("five_hour", "week_opus", "week_sonnet", "gpu")):
             lab = tk.Label(self.root, anchor="w", font=("Segoe UI", 9))
-            lab.grid(row=i, column=0, sticky="ew", padx=6, pady=(4, 0))
+            lab.grid(row=i * 2, column=0, sticky="ew", padx=6, pady=(4, 0))
             style_name = f"TokenFollow.{key}.Horizontal.TProgressbar"
-            bar = ttk.Progressbar(self.root, length=300, mode="determinate",
+            bar = ttk.Progressbar(self.root, length=320, mode="determinate",
                                   maximum=100, style=style_name)
-            bar.grid(row=i, column=0, sticky="ew", padx=6, pady=(16, 4))
+            bar.grid(row=i * 2 + 1, column=0, sticky="ew", padx=6, pady=(0, 4))
             self._labels[key] = lab
             self._bars[key] = bar
             self._styles[key] = style_name
