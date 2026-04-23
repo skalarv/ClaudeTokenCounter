@@ -12,7 +12,7 @@ from tkinter import ttk
 from datetime import datetime
 from typing import Callable, Dict, Optional
 
-from tokenfollow.aggregator import Snapshot, WindowSnapshot
+from tokenfollow.aggregator import ProjectionSnapshot, Snapshot, WindowSnapshot
 
 
 BAND_GREEN = "#2e9e4b"
@@ -77,7 +77,7 @@ class OverlayWindow:
         """
         self.root = root or tk.Tk()
         self.root.title("TokenFollow")
-        self.root.geometry("340x220")
+        self.root.geometry("340x320")
         self.root.resizable(False, False)
         self.root.attributes("-topmost", True)
 
@@ -90,7 +90,8 @@ class OverlayWindow:
         self._styles: Dict[str, str] = {}
         self._style = ttk.Style(self.root)
 
-        for i, key in enumerate(("five_hour", "week_opus", "week_sonnet", "gpu")):
+        for i, key in enumerate(("five_hour", "opus_5h_proj", "week_opus",
+                                 "opus_week_proj", "week_sonnet", "gpu")):
             lab = tk.Label(self.root, anchor="w", font=("Segoe UI", 9))
             lab.grid(row=i * 2, column=0, sticky="ew", padx=6, pady=(4, 0))
             style_name = f"TokenFollow.{key}.Horizontal.TProgressbar"
@@ -103,10 +104,15 @@ class OverlayWindow:
         self.root.grid_columnconfigure(0, weight=1)
 
     def update(self, snap: Snapshot) -> None:
-        """Refresh all four rows from *snap*."""
+        """Refresh all six rows from *snap*."""
         self._render_token("five_hour", "5h window", snap.five_hour, snap.now)
+        self._render_projection("opus_5h_proj", "Opus · 5h",
+                                snap.opus_5h_proj, snap.now)
         self._render_token("week_opus", "Week · Opus", snap.week_opus, snap.now)
-        self._render_token("week_sonnet", "Week · Sonnet", snap.week_sonnet, snap.now)
+        self._render_projection("opus_week_proj", "Opus · week",
+                                snap.opus_week_proj, snap.now)
+        self._render_token("week_sonnet", "Week · Sonnet",
+                           snap.week_sonnet, snap.now)
         self._render_gpu(snap.gpu_percent)
 
     def _render_token(self, key: str, label: str,
@@ -120,6 +126,29 @@ class OverlayWindow:
         self._labels[key]["text"] = (
             f"{label}   {_fmt_tokens(w.used)} / {_fmt_tokens(w.budget)}   ·   "
             f"{_fmt_delta(w.resets_at, now)}"
+        )
+
+    def _render_projection(self, key: str, label: str,
+                           proj: ProjectionSnapshot, now: datetime) -> None:
+        if proj.resets_at is None:
+            self._bars[key]["value"] = 0
+            self._style.configure(self._styles[key], background="#555",
+                                  troughcolor="#222", bordercolor="#222")
+            self._labels[key]["text"] = f"{label}   idle"
+            return
+        frac = (proj.projected_used / proj.budget) if proj.budget > 0 else 0.0
+        frac = max(0.0, min(1.0, frac))
+        color = band_color(frac)
+        self._style.configure(self._styles[key], background=color,
+                              troughcolor="#222", bordercolor="#222")
+        self._bars[key]["value"] = frac * 100
+        if proj.projected_used > proj.budget:
+            detail = f"overrun by {_fmt_tokens(proj.projected_used - proj.budget)}"
+        else:
+            detail = (f"proj {_fmt_tokens(proj.projected_used)} / "
+                      f"{_fmt_tokens(proj.budget)} @ reset")
+        self._labels[key]["text"] = (
+            f"{label}   {detail}   ·   {_fmt_delta(proj.resets_at, now)}"
         )
 
     def _render_gpu(self, percent: Optional[int]) -> None:

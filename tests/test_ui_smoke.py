@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from tokenfollow.aggregator import Snapshot, WindowSnapshot
+from tokenfollow.aggregator import ProjectionSnapshot, Snapshot, WindowSnapshot
 from tokenfollow.ui import OverlayWindow, band_color, BAND_GREEN, BAND_AMBER, BAND_RED
 from tokenfollow.ui import _fmt_tokens, _fmt_delta
 
@@ -13,7 +13,17 @@ from tokenfollow.ui import _fmt_tokens, _fmt_delta
 UTC = timezone.utc
 
 
-def _snap(f=0.2, o=0.2, s=0.2, gpu=30):
+def _proj(used_now=0, budget=35_000_000, projected_used=0,
+          rate=0.0, resets_at=None, until_zero=None):
+    return ProjectionSnapshot(
+        used_now=used_now, budget=budget, rate_per_sec=rate,
+        projected_used=projected_used, resets_at=resets_at,
+        seconds_until_zero=until_zero,
+    )
+
+
+def _snap(f=0.2, o=0.2, s=0.2, gpu=30,
+          p5h=None, pweek=None):
     now = datetime(2026, 4, 21, 12, 0, tzinfo=UTC)
     return Snapshot(
         five_hour=WindowSnapshot(int(f * 88_000_000), 88_000_000,
@@ -23,6 +33,17 @@ def _snap(f=0.2, o=0.2, s=0.2, gpu=30):
         week_sonnet=WindowSnapshot(int(s * 440_000_000), 440_000_000,
                                    now + timedelta(days=4, hours=1), 0),
         now=now,
+        opus_5h_proj=p5h if p5h is not None else _proj(
+            used_now=5_000_000, projected_used=20_000_000, rate=2000.0,
+            resets_at=now + timedelta(hours=2, minutes=14),
+            until_zero=15_000,
+        ),
+        opus_week_proj=pweek if pweek is not None else _proj(
+            used_now=14_000_000, budget=70_000_000,
+            projected_used=40_000_000, rate=100.0,
+            resets_at=now + timedelta(days=3, hours=5),
+            until_zero=560_000,
+        ),
         gpu_percent=gpu,
     )
 
@@ -129,6 +150,68 @@ def test_restore_position_none_coords_is_noop(tk_root):
     # NOT contain a manually-set large offset (we just confirm it doesn't
     # contain coordinates we never asked for by checking no exception raised).
     assert tk_root.winfo_exists()
+
+
+def test_all_six_rows_present(tk_root):
+    w = OverlayWindow(root=tk_root, on_close=lambda: None)
+    w.update(_snap())
+    tk_root.update_idletasks()
+    keys = set(w.label_texts().keys())
+    assert keys == {"five_hour", "opus_5h_proj", "week_opus",
+                    "opus_week_proj", "week_sonnet", "gpu"}
+
+
+def test_projection_label_shows_proj_and_budget(tk_root):
+    w = OverlayWindow(root=tk_root, on_close=lambda: None)
+    w.update(_snap())
+    tk_root.update_idletasks()
+    text = w.label_texts()["opus_5h_proj"]
+    assert "Opus" in text and "5h" in text
+    assert "proj" in text.lower()
+
+
+def test_projection_overrun_label(tk_root):
+    w = OverlayWindow(root=tk_root, on_close=lambda: None)
+    over = _proj(used_now=30_000_000, budget=35_000_000,
+                 projected_used=41_000_000, rate=3000.0,
+                 resets_at=datetime(2026, 4, 21, 14, 0, tzinfo=UTC),
+                 until_zero=1_600)
+    w.update(_snap(p5h=over))
+    tk_root.update_idletasks()
+    text = w.label_texts()["opus_5h_proj"]
+    assert "overrun" in text.lower()
+
+
+def test_projection_idle_label(tk_root):
+    w = OverlayWindow(root=tk_root, on_close=lambda: None)
+    idle = _proj(used_now=0, budget=35_000_000, projected_used=0,
+                 rate=0.0, resets_at=None, until_zero=None)
+    w.update(_snap(p5h=idle))
+    tk_root.update_idletasks()
+    text = w.label_texts()["opus_5h_proj"]
+    assert "idle" in text.lower()
+
+
+def test_projection_bar_fill_uses_projected_used(tk_root):
+    w = OverlayWindow(root=tk_root, on_close=lambda: None)
+    mid = _proj(used_now=5_000_000, budget=35_000_000,
+                projected_used=17_500_000, rate=1000.0,
+                resets_at=datetime(2026, 4, 21, 14, 0, tzinfo=UTC),
+                until_zero=30_000)
+    w.update(_snap(p5h=mid))
+    # Internal bar widget value should be ~50 (17.5M / 35M = 0.5)
+    bar_val = float(w._bars["opus_5h_proj"]["value"])
+    assert 49 <= bar_val <= 51
+
+
+def test_projection_pinned_at_100_on_overrun(tk_root):
+    w = OverlayWindow(root=tk_root, on_close=lambda: None)
+    over = _proj(used_now=30_000_000, budget=35_000_000,
+                 projected_used=100_000_000, rate=3000.0,
+                 resets_at=datetime(2026, 4, 21, 14, 0, tzinfo=UTC),
+                 until_zero=1_600)
+    w.update(_snap(p5h=over))
+    assert float(w._bars["opus_5h_proj"]["value"]) == 100.0
 
 
 def test_current_position_returns_none_on_bad_geometry(tk_root):

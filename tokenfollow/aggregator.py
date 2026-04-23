@@ -34,6 +34,27 @@ class WindowSnapshot:
 
 
 @dataclass
+class ProjectionSnapshot:
+    """Burn-rate projection for Opus usage inside one window.
+
+    ``projected_used`` is ``used_now + rate_per_sec * seconds_until_reset``.
+    ``budget`` is the hybrid max of (default, observed, used_now) — deliberately
+    NOT inflated by ``projected_used``, so the projection bar can honestly show
+    an overrun when ``projected_used > budget``.
+    """
+
+    used_now: int
+    budget: int
+    rate_per_sec: float
+    projected_used: int
+    resets_at: Optional[datetime]
+    seconds_until_zero: Optional[int]
+
+
+DEFAULT_RATE_WINDOWS = {"opus_5h": 900, "opus_week": 21_600}
+
+
+@dataclass
 class Snapshot:
     """Complete state for one overlay refresh cycle.
 
@@ -45,6 +66,8 @@ class Snapshot:
     week_opus: WindowSnapshot
     week_sonnet: WindowSnapshot
     now: datetime
+    opus_5h_proj: "ProjectionSnapshot" = None  # type: ignore[assignment]
+    opus_week_proj: "ProjectionSnapshot" = None  # type: ignore[assignment]
     gpu_percent: Optional[int] = None
 
 
@@ -82,11 +105,59 @@ def _current_5h_window(records: List[UsageRecord], now: datetime):
     return None, []
 
 
+def _project(window_records: List[UsageRecord],
+             budget_default: int,
+             budget_observed: int,
+             now: datetime,
+             window_end: Optional[datetime],
+             anchor: Optional[datetime],
+             trailing_seconds: int,
+             weights: Mapping[str, float]) -> ProjectionSnapshot:
+    """Build a burn-rate projection for one set of in-window records."""
+    used_now = sum(_counted(r, weights) for r in window_records)
+
+    if window_end is None or anchor is None:
+        # No active window (weekly with no opus records, or idle 5h).
+        budget = max(budget_default, budget_observed, used_now)
+        return ProjectionSnapshot(
+            used_now=used_now, budget=budget, rate_per_sec=0.0,
+            projected_used=used_now, resets_at=None, seconds_until_zero=None,
+        )
+
+    t_remaining = max(0.0, (window_end - now).total_seconds())
+
+    # Trailing-window rate: sum of tokens from records in [now-T, now],
+    # clamped so we never divide by more than the in-window elapsed time.
+    trailing_cutoff = now - timedelta(seconds=trailing_seconds)
+    lower = max(trailing_cutoff, anchor)
+    recent_tokens = sum(_counted(r, weights) for r in window_records
+                        if r.ts >= lower)
+    elapsed_in_window = (now - anchor).total_seconds()
+    t_clamped = max(1.0, min(float(trailing_seconds), elapsed_in_window))
+    rate_per_sec = recent_tokens / t_clamped
+
+    projected_used = int(used_now + rate_per_sec * t_remaining)
+    budget = max(budget_default, budget_observed, used_now)
+
+    if rate_per_sec <= 0.0 or used_now >= budget:
+        seconds_until_zero: Optional[int] = None
+    else:
+        seconds_until_zero = int((budget - used_now) / rate_per_sec)
+
+    return ProjectionSnapshot(
+        used_now=used_now, budget=budget, rate_per_sec=rate_per_sec,
+        projected_used=projected_used, resets_at=window_end,
+        seconds_until_zero=seconds_until_zero,
+    )
+
+
 def aggregate(records: List[UsageRecord],
               budgets: Mapping[str, int],
               observed: Mapping[str, int],
               now: datetime,
-              weights: Mapping[str, float]) -> Snapshot:
+              weights: Mapping[str, float],
+              *,
+              rate_windows: Optional[Mapping[str, int]] = None) -> Snapshot:
     """Build a :class:`Snapshot` from the full record history up to *now*.
 
     Args:
@@ -135,5 +206,34 @@ def aggregate(records: List[UsageRecord],
         resets_at=sonnet_reset,
         observed_max=observed["week_sonnet"],
     )
+
+    rw = dict(DEFAULT_RATE_WINDOWS)
+    if rate_windows:
+        rw.update(rate_windows)
+
+    opus_in_5h = [r for r in win_records if _family(r.model) == "opus"]
+    opus_5h_proj = _project(
+        window_records=opus_in_5h,
+        budget_default=int(budgets.get("5h_opus", 0)),
+        budget_observed=int(observed.get("5h_opus", 0)),
+        now=now,
+        window_end=(anchor + FIVE_HOURS) if anchor else None,
+        anchor=anchor,
+        trailing_seconds=int(rw["opus_5h"]),
+        weights=weights,
+    )
+
+    opus_week_proj = _project(
+        window_records=opus_src,
+        budget_default=int(budgets["week_opus"]),
+        budget_observed=int(observed["week_opus"]),
+        now=now,
+        window_end=opus_reset,
+        anchor=opus_src[0].ts if opus_src else None,
+        trailing_seconds=int(rw["opus_week"]),
+        weights=weights,
+    )
+
     return Snapshot(five_hour=five, week_opus=week_opus,
-                    week_sonnet=week_sonnet, now=now)
+                    week_sonnet=week_sonnet, now=now,
+                    opus_5h_proj=opus_5h_proj, opus_week_proj=opus_week_proj)
