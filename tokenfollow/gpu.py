@@ -26,6 +26,14 @@ PERFCOUNTER_CMD = [
 
 _TIMEOUT_S = 1.5
 
+# On Windows, suppress the console window that would otherwise flash (and steal
+# focus) each time we spawn nvidia-smi or powershell from the Tk main loop.
+_NO_WINDOW_KWARGS = (
+    {"creationflags": subprocess.CREATE_NO_WINDOW}
+    if hasattr(subprocess, "CREATE_NO_WINDOW")
+    else {}
+)
+
 
 class GPUMonitor:
     """Detects and queries the best available GPU utilisation source.
@@ -50,7 +58,8 @@ class GPUMonitor:
         """Run *cmd* and return the parsed integer result, or ``None`` on any failure."""
         try:
             cp = subprocess.run(cmd, capture_output=True, text=True,
-                                timeout=_TIMEOUT_S, check=False)
+                                timeout=_TIMEOUT_S, check=False,
+                                **_NO_WINDOW_KWARGS)
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             return None
         if cp.returncode != 0:
