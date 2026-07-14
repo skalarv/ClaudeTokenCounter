@@ -10,9 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import List, Mapping, Optional
+from typing import TYPE_CHECKING, List, Mapping, Optional
 
 from tokenfollow.parser import UsageRecord
+
+if TYPE_CHECKING:  # pragma: no cover
+    from tokenfollow.account import AccountUsage
 
 
 FIVE_HOURS = timedelta(hours=5)
@@ -35,7 +38,7 @@ class WindowSnapshot:
 
 @dataclass
 class ProjectionSnapshot:
-    """Burn-rate projection for Opus usage inside one window.
+    """Burn-rate projection for one premium family (Opus / Fable) inside one window.
 
     ``projected_used`` is ``used_now + rate_per_sec * seconds_until_reset``.
     ``budget`` is the hybrid max of (default, observed, used_now) — deliberately
@@ -51,24 +54,30 @@ class ProjectionSnapshot:
     seconds_until_zero: Optional[int]
 
 
-DEFAULT_RATE_WINDOWS = {"opus_5h": 900, "opus_week": 21_600}
+DEFAULT_RATE_WINDOWS = {"opus_5h": 900, "opus_week": 21_600,
+                        "fable_5h": 900, "fable_week": 21_600}
 
 
 @dataclass
 class Snapshot:
     """Complete state for one overlay refresh cycle.
 
-    ``gpu_percent`` is set by the caller after :func:`aggregate` returns;
-    it is ``None`` when no GPU source is available.
+    ``gpu_percent`` and ``account`` are set by the caller after
+    :func:`aggregate` returns; each is ``None`` when its source is
+    unavailable.
     """
 
     five_hour: WindowSnapshot
     week_opus: WindowSnapshot
     week_sonnet: WindowSnapshot
     now: datetime
-    opus_5h_proj: "ProjectionSnapshot" = None  # type: ignore[assignment]
-    opus_week_proj: "ProjectionSnapshot" = None  # type: ignore[assignment]
+    opus_5h_proj: Optional[ProjectionSnapshot] = None
+    opus_week_proj: Optional[ProjectionSnapshot] = None
+    week_fable: Optional[WindowSnapshot] = None
+    fable_5h_proj: Optional[ProjectionSnapshot] = None
+    fable_week_proj: Optional[ProjectionSnapshot] = None
     gpu_percent: Optional[int] = None
+    account: Optional["AccountUsage"] = None
 
 
 def _counted(rec: UsageRecord, weights: Mapping[str, float]) -> int:
@@ -78,7 +87,9 @@ def _counted(rec: UsageRecord, weights: Mapping[str, float]) -> int:
 
 
 def _family(model: str) -> str:
-    """Map a model string to ``"opus"``, ``"sonnet"``, ``"haiku"``, or ``"other"``."""
+    """Map a model string to ``"fable"``, ``"opus"``, ``"sonnet"``, ``"haiku"``, or ``"other"``."""
+    if model.startswith(("claude-fable", "claude-mythos")):
+        return "fable"
     if model.startswith("claude-opus"):
         return "opus"
     if model.startswith("claude-sonnet"):
@@ -89,12 +100,18 @@ def _family(model: str) -> str:
 
 
 def _current_5h_window(records: List[UsageRecord], now: datetime):
-    """Return (anchor_ts, [records in window]) or (None, [])."""
+    """Return (anchor_ts, [records in window]) or (None, []).
+
+    A window is anchored at its first record and lasts exactly five hours;
+    the first record at or past ``anchor + 5h`` starts the next window.
+    (Matching Claude's session semantics — a window never stretches past
+    five hours no matter how continuous the activity is.)
+    """
     if not records:
         return None, []
     windows = [[records[0]]]
     for rec in records[1:]:
-        if rec.ts - windows[-1][-1].ts >= FIVE_HOURS:
+        if rec.ts - windows[-1][0].ts >= FIVE_HOURS:
             windows.append([rec])
         else:
             windows[-1].append(rec)
@@ -151,6 +168,52 @@ def _project(window_records: List[UsageRecord],
     )
 
 
+def _family_windows(fam: str,
+                    recent: List[UsageRecord],
+                    win_records: List[UsageRecord],
+                    anchor: Optional[datetime],
+                    budgets: Mapping[str, int],
+                    observed: Mapping[str, int],
+                    now: datetime,
+                    rw: Mapping[str, int],
+                    weights: Mapping[str, float]):
+    """Weekly window + 5h/week projections for one premium family (opus / fable)."""
+    src = [r for r in recent if _family(r.model) == fam]
+    used = sum(_counted(r, weights) for r in src)
+    reset = (src[0].ts + ONE_WEEK) if src else None
+    week_budget_default = int(budgets.get(f"week_{fam}", 0))
+    week_budget_observed = int(observed.get(f"week_{fam}", 0))
+    week = WindowSnapshot(
+        used=used,
+        budget=max(week_budget_default, week_budget_observed, used),
+        resets_at=reset,
+        observed_max=week_budget_observed,
+    )
+
+    in_5h = [r for r in win_records if _family(r.model) == fam]
+    proj_5h = _project(
+        window_records=in_5h,
+        budget_default=int(budgets.get(f"5h_{fam}", 0)),
+        budget_observed=int(observed.get(f"5h_{fam}", 0)),
+        now=now,
+        window_end=(anchor + FIVE_HOURS) if anchor else None,
+        anchor=anchor,
+        trailing_seconds=int(rw[f"{fam}_5h"]),
+        weights=weights,
+    )
+    proj_week = _project(
+        window_records=src,
+        budget_default=week_budget_default,
+        budget_observed=week_budget_observed,
+        now=now,
+        window_end=reset,
+        anchor=src[0].ts if src else None,
+        trailing_seconds=int(rw[f"{fam}_week"]),
+        weights=weights,
+    )
+    return week, proj_5h, proj_week
+
+
 def aggregate(records: List[UsageRecord],
               budgets: Mapping[str, int],
               observed: Mapping[str, int],
@@ -162,8 +225,9 @@ def aggregate(records: List[UsageRecord],
 
     Args:
         records: All usage records (order does not matter; sorted internally).
-        budgets: Default ceiling tokens keyed by ``"5h"``, ``"week_opus"``,
-            ``"week_sonnet"``.
+        budgets: Default ceiling tokens keyed by ``"5h"``, ``"5h_opus"``,
+            ``"5h_fable"``, ``"week_opus"``, ``"week_fable"``,
+            ``"week_sonnet"`` (missing premium-family keys default to 0).
         observed: Previously observed maxima (same keys as *budgets*).
         now: Reference timestamp; must be timezone-aware UTC.
         weights: Token-weight overrides, e.g. ``{"cache_read": 0.1}``.
@@ -186,24 +250,12 @@ def aggregate(records: List[UsageRecord],
     cutoff = now - ONE_WEEK
     recent = [r for r in records if r.ts >= cutoff]
 
-    opus_src = [r for r in recent if _family(r.model) == "opus"]
     sonnet_src = [r for r in recent if _family(r.model) in ("sonnet", "haiku")]
-
-    opus_used = sum(_counted(r, weights) for r in opus_src)
     sonnet_used = sum(_counted(r, weights) for r in sonnet_src)
-    opus_reset = (opus_src[0].ts + ONE_WEEK) if opus_src else None
-    sonnet_reset = (sonnet_src[0].ts + ONE_WEEK) if sonnet_src else None
-
-    week_opus = WindowSnapshot(
-        used=opus_used,
-        budget=max(budgets["week_opus"], observed["week_opus"], opus_used),
-        resets_at=opus_reset,
-        observed_max=observed["week_opus"],
-    )
     week_sonnet = WindowSnapshot(
         used=sonnet_used,
         budget=max(budgets["week_sonnet"], observed["week_sonnet"], sonnet_used),
-        resets_at=sonnet_reset,
+        resets_at=(sonnet_src[0].ts + ONE_WEEK) if sonnet_src else None,
         observed_max=observed["week_sonnet"],
     )
 
@@ -211,29 +263,13 @@ def aggregate(records: List[UsageRecord],
     if rate_windows:
         rw.update(rate_windows)
 
-    opus_in_5h = [r for r in win_records if _family(r.model) == "opus"]
-    opus_5h_proj = _project(
-        window_records=opus_in_5h,
-        budget_default=int(budgets.get("5h_opus", 0)),
-        budget_observed=int(observed.get("5h_opus", 0)),
-        now=now,
-        window_end=(anchor + FIVE_HOURS) if anchor else None,
-        anchor=anchor,
-        trailing_seconds=int(rw["opus_5h"]),
-        weights=weights,
-    )
-
-    opus_week_proj = _project(
-        window_records=opus_src,
-        budget_default=int(budgets["week_opus"]),
-        budget_observed=int(observed["week_opus"]),
-        now=now,
-        window_end=opus_reset,
-        anchor=opus_src[0].ts if opus_src else None,
-        trailing_seconds=int(rw["opus_week"]),
-        weights=weights,
-    )
+    week_opus, opus_5h_proj, opus_week_proj = _family_windows(
+        "opus", recent, win_records, anchor, budgets, observed, now, rw, weights)
+    week_fable, fable_5h_proj, fable_week_proj = _family_windows(
+        "fable", recent, win_records, anchor, budgets, observed, now, rw, weights)
 
     return Snapshot(five_hour=five, week_opus=week_opus,
                     week_sonnet=week_sonnet, now=now,
-                    opus_5h_proj=opus_5h_proj, opus_week_proj=opus_week_proj)
+                    opus_5h_proj=opus_5h_proj, opus_week_proj=opus_week_proj,
+                    week_fable=week_fable, fable_5h_proj=fable_5h_proj,
+                    fable_week_proj=fable_week_proj)

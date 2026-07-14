@@ -51,7 +51,7 @@ two-way enforced by `scripts/check_matrix.py`:
 | F40 | Subprocess timeout falls back to last-good           | tests/test_gpu.py::test_timeout_returns_last_good                    |
 | F41 | source="none" -> read() returns None                 | tests/test_gpu.py::test_none_source_read_is_none                     |
 | F42 | Color band thresholds (green / amber / red)          | tests/test_ui_smoke.py::test_band_color_thresholds                   |
-| F43 | Window constructs and renders four rows              | tests/test_ui_smoke.py::test_window_constructs_and_renders           |
+| F43 | Window constructs and renders all rows               | tests/test_ui_smoke.py::test_window_constructs_and_renders           |
 | F44 | GPU row shows N/A when percent is None               | tests/test_ui_smoke.py::test_gpu_row_shows_na_when_none              |
 | F45 | Close callback fires on user close                   | tests/test_ui_smoke.py::test_close_callback_fires                    |
 | F46 | Always-on-top reasserted on restore                  | tests/test_ui_smoke.py::test_topmost_reasserted_on_restore           |
@@ -67,3 +67,67 @@ two-way enforced by `scripts/check_matrix.py`:
 | F56 | End-to-end mid-5h-window snapshot                    | tests/test_integration.py::test_golden_mid_window                    |
 | F57 | End-to-end Opus-near-weekly-cap snapshot             | tests/test_integration.py::test_golden_opus_near_cap                 |
 | F58 | End-to-end after-idle snapshot (no active window)    | tests/test_integration.py::test_golden_after_idle                    |
+| F59 | Projections exist and are idle on empty input        | tests/test_aggregator.py::test_projections_exist_and_are_idle_on_empty |
+| F60 | Opus 5h projection basic burn-rate math              | tests/test_aggregator.py::test_opus_5h_projection_basic              |
+| F61 | Trailing rate window excludes older records          | tests/test_aggregator.py::test_opus_5h_trailing_window_excludes_older_records |
+| F62 | Rate is zero with no recent activity                 | tests/test_aggregator.py::test_opus_5h_rate_zero_when_no_recent_activity |
+| F63 | Trailing rate window clamped to in-window elapsed    | tests/test_aggregator.py::test_opus_5h_trailing_window_clamped_to_window_elapsed |
+| F64 | seconds_until_zero derived from remaining budget     | tests/test_aggregator.py::test_opus_5h_seconds_until_zero            |
+| F65 | Projection may honestly exceed budget (overrun)      | tests/test_aggregator.py::test_opus_5h_projection_can_exceed_budget  |
+| F66 | Budget stays at default when projection below it     | tests/test_aggregator.py::test_opus_5h_projection_respects_default_when_below |
+| F67 | Opus 5h projection counts only opus records          | tests/test_aggregator.py::test_opus_5h_only_counts_opus_records      |
+| F68 | Opus weekly projection basic burn-rate math          | tests/test_aggregator.py::test_opus_week_projection_basic            |
+| F69 | Opus weekly projection idle without opus records     | tests/test_aggregator.py::test_opus_week_idle_when_no_opus_records   |
+| F70 | aggregate() works without explicit rate_windows      | tests/test_aggregator.py::test_aggregate_default_rate_windows        |
+| F71 | Aggregator tolerates missing 5h_opus budget key      | tests/test_aggregator.py::test_aggregate_tolerates_missing_5h_opus_key |
+| F72 | First run writes 5h_opus defaults                    | tests/test_budget.py::test_first_run_has_5h_opus_defaults            |
+| F73 | First run writes projection rate-window defaults     | tests/test_budget.py::test_first_run_has_rate_window_defaults        |
+| F74 | budgets/observed expose 5h_opus keys                 | tests/test_budget.py::test_budgets_includes_5h_opus                  |
+| F75 | maybe_bump learns 5h_opus peak from projection       | tests/test_budget.py::test_maybe_bump_5h_opus_from_projection        |
+| F76 | Projection label shows proj / budget                 | tests/test_ui_smoke.py::test_projection_label_shows_proj_and_budget  |
+| F77 | Projection label switches to overrun wording         | tests/test_ui_smoke.py::test_projection_overrun_label                |
+| F78 | Projection label shows idle when no window           | tests/test_ui_smoke.py::test_projection_idle_label                   |
+| F79 | Projection bar fill driven by projected_used         | tests/test_ui_smoke.py::test_projection_bar_fill_uses_projected_used |
+| F80 | Projection bar pinned at 100% on overrun             | tests/test_ui_smoke.py::test_projection_pinned_at_100_on_overrun     |
+| F81 | All ten overlay rows present                         | tests/test_ui_smoke.py::test_all_ten_rows_present                    |
+| F82 | Continuous usage rolls into a new 5h window at +5h   | tests/test_aggregator.py::test_continuous_usage_starts_new_window_at_5h |
+| F83 | Fable / Mythos models bucketed into week_fable       | tests/test_aggregator.py::test_fable_weekly_bucket                   |
+| F84 | Fable records count toward the 5h total              | tests/test_aggregator.py::test_fable_counts_in_5h_total              |
+| F85 | Fable 5h projection basic burn-rate math             | tests/test_aggregator.py::test_fable_5h_projection_basic             |
+| F86 | Fable 5h projection excludes other families          | tests/test_aggregator.py::test_fable_5h_projection_excludes_other_families |
+| F87 | Fable weekly projection basic burn-rate math         | tests/test_aggregator.py::test_fable_week_projection_basic           |
+| F88 | Fable weekly projection idle without fable records   | tests/test_aggregator.py::test_fable_week_idle_when_no_fable_records |
+| F89 | Aggregator tolerates pre-Fable budget dicts          | tests/test_aggregator.py::test_aggregate_tolerates_missing_fable_keys |
+| F90 | First run writes Fable defaults                      | tests/test_budget.py::test_first_run_has_fable_defaults              |
+| F91 | Pre-Fable config transparently gains fable keys      | tests/test_budget.py::test_pre_fable_config_gains_fable_keys         |
+| F92 | maybe_bump learns Fable weekly and 5h peaks          | tests/test_budget.py::test_maybe_bump_fable                          |
+| F93 | Fable projection rows render with labels             | tests/test_ui_smoke.py::test_fable_projection_rows_render            |
+| F94 | UI tolerates snapshots missing Fable fields          | tests/test_ui_smoke.py::test_render_tolerates_missing_fable_fields   |
+| F95 | End-to-end Fable + Sonnet mixed snapshot             | tests/test_integration.py::test_golden_fable_mixed                   |
+| F96 | OAuth token read from top-level credentials          | tests/test_account.py::test_token_top_level                          |
+| F97 | OAuth token read from nested credentials             | tests/test_account.py::test_token_nested_one_level                   |
+| F98 | Missing credentials file -> no token                 | tests/test_account.py::test_token_missing_file                       |
+| F99 | Corrupt credentials JSON -> no token                 | tests/test_account.py::test_token_bad_json                           |
+| F100 | Credentials without accessToken -> no token         | tests/test_account.py::test_token_absent_in_json                     |
+| F101 | Non-dict credentials JSON -> no token               | tests/test_account.py::test_token_json_not_dict                      |
+| F102 | Live /usage payload shape parsed (limits array)     | tests/test_account.py::test_parse_real_shape                         |
+| F103 | Fallback to five_hour/seven_day fields              | tests/test_account.py::test_parse_fallback_five_hour_seven_day       |
+| F104 | Malformed limit entries skipped                     | tests/test_account.py::test_parse_skips_malformed_limit_entries      |
+| F105 | Naive reset timestamp treated as UTC                | tests/test_account.py::test_parse_naive_timestamp_treated_as_utc     |
+| F106 | Empty / garbage payload -> None                     | tests/test_account.py::test_parse_empty_or_bad_payload               |
+| F107 | Monitor fetch success; token via env not argv       | tests/test_account.py::test_monitor_fetch_success                    |
+| F108 | Monitor caches within refresh window                | tests/test_account.py::test_monitor_caches_within_refresh_window     |
+| F109 | Monitor keeps last-good on fetch failure            | tests/test_account.py::test_monitor_keeps_last_good_on_failure       |
+| F110 | Monitor tolerates subprocess exception              | tests/test_account.py::test_monitor_runner_exception_returns_none    |
+| F111 | Monitor skips fetch when credentials missing        | tests/test_account.py::test_monitor_missing_credentials              |
+| F112 | Monitor tolerates garbage stdout (proxy page)       | tests/test_account.py::test_monitor_garbage_stdout                   |
+| F113 | Default spawner runs thunk on a thread              | tests/test_account.py::test_monitor_default_spawner_runs_on_thread   |
+| F114 | No duplicate fetch while one is in flight           | tests/test_account.py::test_monitor_no_refetch_while_in_flight       |
+| F115 | Account severity overrides colour thresholds        | tests/test_ui_smoke.py::test_account_color_severity_wins              |
+| F116 | Account session percent drives 5h row               | tests/test_ui_smoke.py::test_account_drives_five_hour_row             |
+| F117 | Week · All row shows account weekly percent         | tests/test_ui_smoke.py::test_week_all_row_shows_account_percent       |
+| F118 | Week · All row shows N/A without account data       | tests/test_ui_smoke.py::test_week_all_row_na_without_account          |
+| F119 | Scoped Fable account limit drives Week · Fable row  | tests/test_ui_smoke.py::test_scoped_fable_limit_drives_week_fable_row |
+| F120 | Rows fall back to local estimates without account   | tests/test_ui_smoke.py::test_rows_fall_back_to_estimates_without_account |
+| F121 | Account config defaults written on first run        | tests/test_budget.py::test_account_config_defaults                    |
+| F122 | Account polling can be disabled in config           | tests/test_budget.py::test_account_config_can_be_disabled             |

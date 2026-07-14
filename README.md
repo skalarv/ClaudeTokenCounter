@@ -1,21 +1,41 @@
 # TokenFollow
 
-An always-on-top Windows overlay that shows your Claude Code token usage and
-GPU utilisation in real time.  Four progress bars update every 10 seconds:
-the current 5-hour session, weekly Opus usage, weekly Sonnet+Haiku usage, and
-GPU load — each colour-coded green / amber / red as you approach your limits.
+An always-on-top Windows overlay that shows your Claude Code usage and GPU
+utilisation in real time.  Ten progress bars update every 10 seconds: the
+current 5-hour session, your account's weekly all-models limit, weekly
+Fable/Mythos, Opus, and Sonnet+Haiku usage, burn-rate projections for Fable
+and Opus (5-hour and weekly), and GPU load — each colour-coded
+green / amber / red as you approach your limits.
+
+**Account sync:** where possible, bars show the *real* percentages from
+Anthropic's account usage endpoint (the same source as Claude Code's
+`/usage` panel), polled once a minute using your local Claude Code OAuth
+credentials.  Local token estimates from the JSONL logs stay as annotations
+and power the per-family breakdown and burn-rate projections.
 
 ```
-+------------------------------------------+
-|  5h window   23.4M / 88.0M  · resets in 2h 14m  |
-|  [==========================================>   ] |
-|  Week · Opus  14.1M / 70.0M · resets in 4d 3h   |
-|  [=========================                    ] |
-|  Week · Sonnet 88.2M / 440M · resets in 4d 3h   |
-|  [=========                                   ] |
-|  GPU   47 %                                      |
-|  [========================                     ] |
-+------------------------------------------+
++---------------------------------------------------+
+|  5h window     36% · est 5.8M · resets in 3h 54m  |
+|  [=================>                            ] |
+|  Fable · 5h    proj 31.0M / 35.0M @ reset         |
+|  [========================================>     ] |
+|  Opus · 5h     idle                               |
+|  [                                              ] |
+|  Week · All    58% · resets in 23h 34m            |
+|  [============================>                 ] |
+|  Week · Fable  98% · est 85.4M · resets in 23h    |
+|  [===============================================] |
+|  Fable · week  overrun by 3.1M · resets in 23h    |
+|  [===============================================] |
+|  Week · Opus   30.5M / 369.3M · resets in 3h 5m   |
+|  [====>                                         ] |
+|  Opus · week   proj 30.5M / 369.3M @ reset        |
+|  [====>                                         ] |
+|  Week · Sonnet 25.2M / 440M   · resets in 4d 0h   |
+|  [===>                                          ] |
+|  GPU   47 %                                       |
+|  [=======================>                      ] |
++---------------------------------------------------+
 ```
 
 ---
@@ -47,8 +67,11 @@ budgets): [docs/USAGE.md](docs/USAGE.md)
 ## Architecture
 
 JSONL logs flow from `~/.claude/projects/` through `UsageParser` →
-`aggregate()` → `OverlayWindow`; `GPUMonitor` feeds GPU utilisation into the
-same `Snapshot`.  The package is split into five focused modules so the 97%+
+`aggregate()` → `OverlayWindow`; `GPUMonitor` feeds GPU utilisation and
+`AccountUsageMonitor` feeds real account percentages (from the OAuth `/usage`
+endpoint) into the same `Snapshot`.  Token usage is split by model family —
+Fable/Mythos, Opus, and Sonnet+Haiku — with burn-rate projections for the
+premium families.  The package is split into six focused modules so the 97%+
 branch-coverage gate can be met with fast, isolated unit tests.
 
 Full diagram and design decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

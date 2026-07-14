@@ -17,11 +17,14 @@ def _rec(ts, model="claude-sonnet-4-6", input=100, cache_create=0,
                        cache_create=cache_create, cache_read=cache_read, output=output)
 
 
-BUDGETS = {"5h": 88_000_000, "5h_opus": 35_000_000,
-           "week_opus": 70_000_000, "week_sonnet": 440_000_000}
-OBSERVED = {"5h": 0, "5h_opus": 0, "week_opus": 0, "week_sonnet": 0}
+BUDGETS = {"5h": 88_000_000, "5h_opus": 35_000_000, "5h_fable": 35_000_000,
+           "week_opus": 70_000_000, "week_fable": 70_000_000,
+           "week_sonnet": 440_000_000}
+OBSERVED = {"5h": 0, "5h_opus": 0, "5h_fable": 0,
+            "week_opus": 0, "week_fable": 0, "week_sonnet": 0}
 WEIGHTS = {"cache_read": 0.1}
-RATE_WINDOWS = {"opus_5h": 900, "opus_week": 21_600}
+RATE_WINDOWS = {"opus_5h": 900, "opus_week": 21_600,
+                "fable_5h": 900, "fable_week": 21_600}
 
 
 def test_empty_records(utc):
@@ -53,6 +56,22 @@ def test_exactly_5h_gap_starts_new_window(utc):
     snap = aggregate(records, BUDGETS, OBSERVED, now, WEIGHTS)
     assert snap.five_hour.used == 20 + 50
     assert snap.five_hour.resets_at == utc(2026, 4, 21, 18, 0)
+
+
+def test_continuous_usage_starts_new_window_at_5h(utc):
+    # Records at 8:00, 12:00, 13:30 with no >=5h gap between consecutive
+    # records. The 8:00 window still expires at 13:00, so the 13:30 record
+    # must anchor a NEW window (8:00 + 5h30m >= 5h) — the overlay must not
+    # report "idle" while a session is actually active.
+    records = [
+        _rec(utc(2026, 4, 21,  8, 0), input=10),
+        _rec(utc(2026, 4, 21, 12, 0), input=20),
+        _rec(utc(2026, 4, 21, 13, 30), input=40),
+    ]
+    now = utc(2026, 4, 21, 14, 0)
+    snap = aggregate(records, BUDGETS, OBSERVED, now, WEIGHTS)
+    assert snap.five_hour.used == 40 + 50
+    assert snap.five_hour.resets_at == utc(2026, 4, 21, 18, 30)
 
 
 def test_no_active_window_when_idle(utc):
@@ -318,3 +337,105 @@ def test_aggregate_tolerates_missing_5h_opus_key(utc):
     old_observed = {"5h": 0, "week_opus": 0, "week_sonnet": 0}
     snap = aggregate([], old_budgets, old_observed, utc(2026, 4, 21, 12, 0), WEIGHTS)
     assert snap.opus_5h_proj.used_now == 0
+
+
+# --- Fable tests --------------------------------------------------------------
+
+
+def test_fable_weekly_bucket(utc):
+    # Fable (and Mythos, the shared-model twin) count toward week_fable only.
+    records = [
+        _rec(utc(2026, 4, 20, 10, 0), model="claude-fable-5",  input=1000, output=100),
+        _rec(utc(2026, 4, 20, 11, 0), model="claude-mythos-5", input=500,  output=50),
+        _rec(utc(2026, 4, 20, 12, 0), model="claude-opus-4-8", input=200,  output=20),
+        _rec(utc(2026, 4, 20, 13, 0), model="claude-sonnet-5", input=100,  output=10),
+    ]
+    now = utc(2026, 4, 21, 12, 0)
+    snap = aggregate(records, BUDGETS, OBSERVED, now, WEIGHTS)
+    assert snap.week_fable.used == (1000 + 100) + (500 + 50)
+    assert snap.week_opus.used == 200 + 20
+    assert snap.week_sonnet.used == 100 + 10
+    assert snap.week_fable.resets_at == utc(2026, 4, 20, 10, 0) + timedelta(days=7)
+
+
+def test_fable_counts_in_5h_total(utc):
+    records = [_rec(utc(2026, 4, 21, 11, 0), model="claude-fable-5",
+                    input=1000, output=100)]
+    now = utc(2026, 4, 21, 11, 30)
+    snap = aggregate(records, BUDGETS, OBSERVED, now, WEIGHTS)
+    assert snap.five_hour.used == 1100
+
+
+def test_fable_5h_projection_basic(utc):
+    # Mirror of the opus 5h projection: anchor 11:15, four 1000-token fable
+    # records in the trailing 15-min window → rate 4000/900, projected 80k.
+    records = [
+        _rec(utc(2026, 4, 21, 11, 15), model="claude-fable-5", input=900, output=100),
+        _rec(utc(2026, 4, 21, 11, 20), model="claude-fable-5", input=900, output=100),
+        _rec(utc(2026, 4, 21, 11, 25), model="claude-fable-5", input=900, output=100),
+        _rec(utc(2026, 4, 21, 11, 30), model="claude-fable-5", input=900, output=100),
+    ]
+    now = utc(2026, 4, 21, 11, 30)
+    snap = aggregate(records, BUDGETS, OBSERVED, now, WEIGHTS,
+                     rate_windows=RATE_WINDOWS)
+    p = snap.fable_5h_proj
+    assert p.used_now == 4000
+    assert p.projected_used == 80_000
+    assert p.resets_at == utc(2026, 4, 21, 11, 15) + timedelta(hours=5)
+    assert p.budget == 35_000_000
+
+
+def test_fable_5h_projection_excludes_other_families(utc):
+    records = [
+        _rec(utc(2026, 4, 21, 11, 25), model="claude-opus-4-8",
+             input=9000, output=1000),
+        _rec(utc(2026, 4, 21, 11, 28), model="claude-fable-5",
+             input=900, output=100),
+    ]
+    now = utc(2026, 4, 21, 11, 30)
+    snap = aggregate(records, BUDGETS, OBSERVED, now, WEIGHTS,
+                     rate_windows=RATE_WINDOWS)
+    assert snap.fable_5h_proj.used_now == 1000
+    assert snap.opus_5h_proj.used_now == 10_000
+
+
+def test_fable_week_projection_basic(utc):
+    records = [
+        _rec(utc(2026, 4, 20, 12, 0), model="claude-fable-5", input=900, output=100),
+        _rec(utc(2026, 4, 21, 11, 30), model="claude-fable-5", input=900, output=100),
+    ]
+    now = utc(2026, 4, 21, 12, 0)
+    snap = aggregate(records, BUDGETS, OBSERVED, now, WEIGHTS,
+                     rate_windows=RATE_WINDOWS)
+    p = snap.fable_week_proj
+    assert p.used_now == 2000
+    # Only the 11:30 record is inside the trailing 6h rate window.
+    assert abs(p.rate_per_sec - (1000 / 21_600)) < 1e-6
+    assert p.resets_at == utc(2026, 4, 20, 12, 0) + timedelta(days=7)
+
+
+def test_fable_week_idle_when_no_fable_records(utc):
+    records = [_rec(utc(2026, 4, 20, 10, 0), model="claude-opus-4-8",
+                    input=1000, output=100)]
+    now = utc(2026, 4, 21, 12, 0)
+    snap = aggregate(records, BUDGETS, OBSERVED, now, WEIGHTS,
+                     rate_windows=RATE_WINDOWS)
+    p = snap.fable_week_proj
+    assert p.used_now == 0
+    assert p.rate_per_sec == 0.0
+    assert p.resets_at is None
+    assert snap.week_fable.used == 0
+
+
+def test_aggregate_tolerates_missing_fable_keys(utc):
+    # Pre-Fable config dicts must not crash the aggregator.
+    old_budgets = {"5h": 88_000_000, "5h_opus": 35_000_000,
+                   "week_opus": 70_000_000, "week_sonnet": 440_000_000}
+    old_observed = {"5h": 0, "5h_opus": 0, "week_opus": 0, "week_sonnet": 0}
+    records = [_rec(utc(2026, 4, 21, 11, 0), model="claude-fable-5",
+                    input=1000, output=100)]
+    snap = aggregate(records, old_budgets, old_observed,
+                     utc(2026, 4, 21, 11, 30), WEIGHTS)
+    # Budget degrades to the used amount (hybrid max with 0 defaults).
+    assert snap.week_fable.used == 1100
+    assert snap.week_fable.budget == 1100

@@ -77,10 +77,12 @@ def test_budgets_and_weights_exposed(tmp_path: Path):
     bm = BudgetManager(cfg)
     assert bm.budgets == {"5h": 88_000_000,
                           "5h_opus": 35_000_000,
+                          "5h_fable": 35_000_000,
                           "week_opus": 70_000_000,
+                          "week_fable": 70_000_000,
                           "week_sonnet": 440_000_000}
-    assert bm.observed == {"5h": 0, "5h_opus": 0,
-                           "week_opus": 0, "week_sonnet": 0}
+    assert bm.observed == {"5h": 0, "5h_opus": 0, "5h_fable": 0,
+                           "week_opus": 0, "week_fable": 0, "week_sonnet": 0}
     assert bm.weights == {"cache_read": 0.1}
 
 
@@ -138,7 +140,8 @@ def test_first_run_has_rate_window_defaults(tmp_path: Path):
     data = json.loads(cfg.read_text(encoding="utf-8"))
     assert data["projection"]["opus_5h_rate_window_s"] == 900
     assert data["projection"]["opus_week_rate_window_s"] == 21_600
-    assert bm.rate_windows == {"opus_5h": 900, "opus_week": 21_600}
+    assert bm.rate_windows == {"opus_5h": 900, "opus_week": 21_600,
+                               "fable_5h": 900, "fable_week": 21_600}
 
 
 def test_budgets_includes_5h_opus(tmp_path: Path):
@@ -157,6 +160,63 @@ def test_maybe_bump_5h_opus_from_projection(tmp_path: Path):
     assert changed is True
     data = json.loads(cfg.read_text(encoding="utf-8"))
     assert data["observed_max"]["5h_opus_tokens"] == 40_000_000
+
+
+def test_first_run_has_fable_defaults(tmp_path: Path):
+    cfg = tmp_path / "config.json"
+    bm = BudgetManager(cfg)
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert data["defaults"]["5h_fable_tokens"] == 35_000_000
+    assert data["defaults"]["week_fable_tokens"] == 70_000_000
+    assert data["observed_max"]["5h_fable_tokens"] == 0
+    assert data["projection"]["fable_5h_rate_window_s"] == 900
+    assert bm.budgets["week_fable"] == 70_000_000
+
+
+def test_pre_fable_config_gains_fable_keys(tmp_path: Path):
+    # A config written before Fable support must be transparently upgraded.
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({
+        "defaults": {"5h_tokens": 90_000_000},
+        "observed_max": {"5h_tokens": 12345},
+    }), encoding="utf-8")
+    bm = BudgetManager(cfg)
+    assert bm.budgets["5h"] == 90_000_000          # user value kept
+    assert bm.budgets["week_fable"] == 70_000_000  # fable filled from defaults
+    assert bm.observed["5h"] == 12345
+    assert bm.observed["week_fable"] == 0
+
+
+def test_maybe_bump_fable(tmp_path: Path):
+    cfg = tmp_path / "config.json"
+    bm = BudgetManager(cfg)
+    snap = _snap(five_used=0, opus_used=0, sonnet_used=0)
+    snap.week_fable = _ws(80_000_000, 80_000_000, 0)
+    snap.fable_5h_proj = _proj(36_000_000)
+    changed = bm.maybe_bump(snap)
+    assert changed is True
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert data["observed_max"]["week_fable_tokens"] == 80_000_000
+    assert data["observed_max"]["5h_fable_tokens"] == 36_000_000
+
+
+def test_account_config_defaults(tmp_path: Path):
+    cfg = tmp_path / "config.json"
+    bm = BudgetManager(cfg)
+    assert bm.account_enabled is True
+    assert bm.account_refresh_seconds == 60
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert data["account"] == {"enabled": True, "refresh_seconds": 60}
+
+
+def test_account_config_can_be_disabled(tmp_path: Path):
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"account": {"enabled": False,
+                                           "refresh_seconds": 300}}),
+                   encoding="utf-8")
+    bm = BudgetManager(cfg)
+    assert bm.account_enabled is False
+    assert bm.account_refresh_seconds == 300
 
 
 def test_merge_data_not_dict_when_defaults_is_dict(tmp_path: Path):

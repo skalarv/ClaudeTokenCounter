@@ -20,7 +20,8 @@ def _scenario(tmp_path, fixture_name, now):
     parser = UsageParser(tmp_path / "projects")
     records = parser.scan()
     bm = BudgetManager(tmp_path / "config.json")
-    snap = aggregate(records, bm.budgets, bm.observed, now, bm.weights)
+    snap = aggregate(records, bm.budgets, bm.observed, now, bm.weights,
+                     rate_windows=bm.rate_windows)
     return snap
 
 
@@ -56,3 +57,18 @@ def test_golden_after_idle(tmp_path: Path):
     assert snap.five_hour.used == 0
     assert snap.five_hour.resets_at is None
     assert snap.week_sonnet.used == 600
+
+
+def test_golden_fable_mixed(tmp_path: Path):
+    snap = _scenario(tmp_path, "fable_mixed.jsonl",
+                     datetime(2026, 4, 21, 12, 0, tzinfo=UTC))
+    # per fable line: 500k + 1M + round(2M*0.1) + 100k = 1_800_000; ×2 lines
+    assert snap.week_fable.used == 3_600_000
+    # 5h window anchored at 10:30 holds one fable line + the sonnet line.
+    assert snap.five_hour.used == 1_800_000 + 150_000
+    assert snap.week_sonnet.used == 150_000
+    assert snap.week_opus.used == 0
+    assert snap.fable_5h_proj.used_now == 1_800_000
+    assert snap.fable_week_proj.used_now == 3_600_000
+    assert snap.fable_week_proj.resets_at == \
+        datetime(2026, 4, 25, 9, 0, tzinfo=UTC)

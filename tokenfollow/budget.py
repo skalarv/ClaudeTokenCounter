@@ -19,19 +19,26 @@ DEFAULTS = {
     "defaults": {
         "5h_tokens": 88_000_000,
         "5h_opus_tokens": 35_000_000,
+        "5h_fable_tokens": 35_000_000,
         "week_opus_tokens": 70_000_000,
+        "week_fable_tokens": 70_000_000,
         "week_sonnet_tokens": 440_000_000,
     },
     "observed_max": {
         "5h_tokens": 0,
         "5h_opus_tokens": 0,
+        "5h_fable_tokens": 0,
         "week_opus_tokens": 0,
+        "week_fable_tokens": 0,
         "week_sonnet_tokens": 0,
     },
     "projection": {
         "opus_5h_rate_window_s": 900,
         "opus_week_rate_window_s": 21_600,
+        "fable_5h_rate_window_s": 900,
+        "fable_week_rate_window_s": 21_600,
     },
+    "account": {"enabled": True, "refresh_seconds": 60},
     "window": {"x": None, "y": None},
     "refresh_seconds": 10,
 }
@@ -69,11 +76,13 @@ class BudgetManager:
 
     @property
     def budgets(self) -> Dict[str, int]:
-        """Default token ceilings keyed by ``"5h"``, ``"5h_opus"``, ``"week_opus"``, ``"week_sonnet"``."""
+        """Default token ceilings keyed by ``"5h"``, ``"5h_opus"``, ``"5h_fable"``, ``"week_opus"``, ``"week_fable"``, ``"week_sonnet"``."""
         d = self._data["defaults"]
         return {"5h": d["5h_tokens"],
                 "5h_opus": d["5h_opus_tokens"],
+                "5h_fable": d["5h_fable_tokens"],
                 "week_opus": d["week_opus_tokens"],
+                "week_fable": d["week_fable_tokens"],
                 "week_sonnet": d["week_sonnet_tokens"]}
 
     @property
@@ -82,7 +91,9 @@ class BudgetManager:
         o = self._data["observed_max"]
         return {"5h": o["5h_tokens"],
                 "5h_opus": o["5h_opus_tokens"],
+                "5h_fable": o["5h_fable_tokens"],
                 "week_opus": o["week_opus_tokens"],
+                "week_fable": o["week_fable_tokens"],
                 "week_sonnet": o["week_sonnet_tokens"]}
 
     @property
@@ -90,7 +101,9 @@ class BudgetManager:
         """Trailing-window seconds for burn-rate projections."""
         p = self._data["projection"]
         return {"opus_5h": int(p["opus_5h_rate_window_s"]),
-                "opus_week": int(p["opus_week_rate_window_s"])}
+                "opus_week": int(p["opus_week_rate_window_s"]),
+                "fable_5h": int(p["fable_5h_rate_window_s"]),
+                "fable_week": int(p["fable_week_rate_window_s"])}
 
     @property
     def weights(self) -> Dict[str, float]:
@@ -101,6 +114,16 @@ class BudgetManager:
     def refresh_seconds(self) -> int:
         """Polling interval in seconds (default 10)."""
         return int(self._data["refresh_seconds"])
+
+    @property
+    def account_enabled(self) -> bool:
+        """Whether to poll the account /usage endpoint (default True)."""
+        return bool(self._data["account"]["enabled"])
+
+    @property
+    def account_refresh_seconds(self) -> int:
+        """Minimum seconds between account endpoint fetches (default 60)."""
+        return int(self._data["account"]["refresh_seconds"])
 
     @property
     def window_position(self):
@@ -125,7 +148,11 @@ class BudgetManager:
             ("5h_tokens", snap.five_hour.used),
             ("5h_opus_tokens",
              snap.opus_5h_proj.used_now if snap.opus_5h_proj is not None else 0),
+            ("5h_fable_tokens",
+             snap.fable_5h_proj.used_now if snap.fable_5h_proj is not None else 0),
             ("week_opus_tokens", snap.week_opus.used),
+            ("week_fable_tokens",
+             snap.week_fable.used if snap.week_fable is not None else 0),
             ("week_sonnet_tokens", snap.week_sonnet.used),
         ]
         for key, used in pairs:

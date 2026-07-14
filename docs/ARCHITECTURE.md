@@ -23,19 +23,23 @@
                budgets,               |
                observed,              |
                now,                   |
-               weights)               |
+               weights,               |
+               rate_windows)          |
           |                           |
           v  Snapshot                 |
           |                           |
           +-- snap.gpu_percent <------+
           |
+          +-- snap.account <--- AccountUsageMonitor.read()
+          |                     (OAuth /usage endpoint, background
+          |                      thread, 60s cache, last-good)
           v
     BudgetManager.maybe_bump(snap)
     (updates observed_max in config.json if needed)
           |
           v
     OverlayWindow.update(snap)
-    (redraws four rows via tkinter)
+    (redraws ten rows via tkinter)
           |
           v
     win.root.after(refresh_seconds * 1000, tick)
@@ -68,11 +72,20 @@ mappings, and `now` as explicit parameters and returns a `Snapshot`.  Passing
 `now` explicitly (rather than calling `datetime.now()` internally) makes every
 test fully deterministic without any mocking.
 
-Internally it identifies the current 5-hour window by splitting the sorted
-record list into sub-lists wherever a gap of ≥5 hours occurs, then selecting
-the sub-list whose anchor satisfies `anchor <= now < anchor + 5h`.  The weekly
-windows are computed by filtering to the 7-day rolling cutoff and splitting by
-model family (`opus` vs `sonnet/haiku`).
+Internally it identifies the current 5-hour window by grouping the sorted
+record list into windows **anchored at their first record**: the first record
+at or past `anchor + 5h` starts the next window (a window never stretches past
+five hours, matching Claude's session semantics), then it selects the window
+whose anchor satisfies `anchor <= now < anchor + 5h`.  The weekly windows are
+computed by filtering to the 7-day rolling cutoff and splitting by model
+family (`fable/mythos` vs `opus` vs `sonnet/haiku`).
+
+For each premium family (Fable, Opus), `_family_windows()` builds the weekly
+`WindowSnapshot` plus two `ProjectionSnapshot`s (5-hour and weekly): a
+trailing-window burn rate (`projection.*_rate_window_s` seconds, clamped to
+the in-window elapsed time) is extrapolated to the window's end.  The
+projection budget is deliberately **not** inflated by the projected value, so
+the UI can honestly show an overrun.
 
 The hybrid budget formula — `max(default, observed_max, current_used)` —
 ensures the progress-bar fill fraction is always in `[0, 1]`.
@@ -89,6 +102,25 @@ typed properties.
 window's `used` value against the stored `observed_max` and writes an updated
 `config.json` if any value has grown.  The file is written only when something
 changes, minimising I/O.
+
+### `tokenfollow/account.py`
+
+`AccountUsageMonitor` polls Anthropic's OAuth usage endpoint — the source
+behind Claude Code's `/usage` panel — for the account's real limit
+percentages and reset times.  The access token is read fresh from
+`~/.claude/.credentials.json` on every fetch (Claude Code refreshes that file
+itself), travels to the subprocess via an **environment variable** (never
+argv), and the HTTPS call is made through PowerShell so certificate
+validation uses the Windows trust store — this survives TLS-intercepting
+corporate proxies whose CA Python's bundled OpenSSL rejects.
+
+Fetches run on a daemon thread and are rate-limited by
+`account.refresh_seconds` (default 60 s); `read()` never blocks the Tk main
+loop and returns the last-good `AccountUsage` during in-flight fetches or
+after transient failures.  `parse_usage_payload()` treats the endpoint's
+`limits` array as authoritative (kinds: `session`, `weekly_all`,
+`weekly_scoped` with a per-model scope) and falls back to the legacy
+`five_hour` / `seven_day` fields.
 
 ### `tokenfollow/gpu.py`
 
@@ -127,9 +159,9 @@ module depending on BudgetManager or UsageParser.
 
 ### Single-package layout vs. single-file
 
-The code is split into a `tokenfollow/` package rather than a single
-`token_follow.py` because isolated modules make it possible to reach 97%+
-branch coverage with fast, focused unit tests.  Each module has no runtime
+The code is split into a six-module `tokenfollow/` package rather than a
+single `token_follow.py` because isolated modules make it possible to reach
+97%+ branch coverage with fast, focused unit tests.  Each module has no runtime
 side-effects on import; test files can import them without a Tk display or
 a real `~/.claude` directory.
 
@@ -171,11 +203,12 @@ every branch) in unit tests that run without a Tk display, while
 | Layer | Files | What is tested |
 |---|---|---|
 | **Unit — parser** | `tests/test_parser.py` | `parse_line`, `UsageParser.scan`, offset tracking, truncation recovery, `save_cache` |
-| **Unit — aggregator** | `tests/test_aggregator.py` | 5h window anchoring, gap detection, weekly split, cache-read weighting, model-family mapping |
+| **Unit — aggregator** | `tests/test_aggregator.py` | 5h window anchoring, gap detection, weekly split (incl. Fable/Mythos), cache-read weighting, model-family mapping, burn-rate projections |
 | **Unit — budget** | `tests/test_budget.py` | First-run creation, corrupt recovery, hybrid bump, position round-trip, partial-config merge |
 | **Unit — gpu** | `tests/test_gpu.py` | Source detection, parse, clamp, last-good fallback, timeout behaviour |
+| **Unit — account** | `tests/test_account.py` | Token extraction, `/usage` payload parsing, fetch caching, in-flight dedup, last-good fallback, env-var token transport |
 | **Smoke — ui** | `tests/test_ui_smoke.py` | Full `OverlayWindow` lifecycle, all `band_color` / `_fmt_*` branches, position restore/read |
-| **Golden integration** | `tests/test_integration.py` | Four canned JSONL fixtures → `aggregate()` → exact `Snapshot` field assertions |
+| **Golden integration** | `tests/test_integration.py` | Five canned JSONL fixtures → `aggregate()` → exact `Snapshot` field assertions |
 | **Bidirectional matrix** | `scripts/check_matrix.py` + `tests/FEATURE_MATRIX.md` | Every test in pytest is listed in the matrix; every matrix row maps to a collected test |
 
 Coverage gate: 97% branch coverage required; current coverage is 100%.
