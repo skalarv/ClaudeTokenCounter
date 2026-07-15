@@ -8,6 +8,7 @@
 | **Python** | 3.8+ | Must include `tkinter`; the official [python.org](https://www.python.org/downloads/) installer bundles it |
 | **tkinter** | bundled | Absent in some slim distributions — see Troubleshooting |
 | **Claude Code** | any | `~/.claude/projects/` must exist; TokenFollow reads JSONL logs from there |
+| **Claude Code login** | optional | Account sync reads the OAuth token from `~/.claude/.credentials.json` (written when Claude Code logs in); without it the overlay shows local estimates only |
 
 ---
 
@@ -107,8 +108,14 @@ copy must sit in the same folder as the Python files **or** you must create a
 When the overlay starts for the first time:
 
 * **`config.json`** is created next to `token_follow.py` with default budgets
-  (`88 M` tokens for the 5-hour window, `70 M` for weekly Opus,
-  `440 M` for weekly Sonnet).
+  (`88 M` tokens for the 5-hour window, `70 M` each for weekly Fable and
+  Opus, `440 M` for weekly Sonnet, `35 M` each for the Fable/Opus 5-hour
+  projection bars), account-sync settings (`enabled`, 60 s refresh), and
+  burn-rate projection windows.
+* **Account sync** starts automatically if `~/.claude/.credentials.json`
+  exists: within about a minute the 5h / Week · All / scoped weekly bars
+  switch from local estimates to your account's real percentages (the same
+  numbers as Claude Code's `/usage` panel).
 * **`cache.json`** is written on graceful close; it records file byte-offsets
   for diagnostic purposes only and is not read on startup.
 * The window appears in the **upper-left area** of the screen (Tk default
@@ -144,4 +151,5 @@ That's it — nothing else to clean up.
 | **Window appears briefly, then vanishes** | An unhandled exception in the `tick` callback | Run `python token_follow.py` from a Command Prompt (not `pythonw`); the traceback will appear in the console |
 | `install.bat` exits at step [4/4] with "Could not create Desktop shortcut" | PowerShell execution policy or COM restriction | Create the shortcut manually: right-click `TokenFollow.bat` → Send to → Desktop (create shortcut) |
 | **Bars never move / always zero** | `~/.claude/projects/` is empty or Claude Code hasn't been used | Run Claude Code at least once; the parser needs at least one `.jsonl` file |
+| **`Week · All` stays N/A / no `%` on the 5h bar** | Account sync has no credentials, the token expired, or the endpoint is unreachable | Open Claude Code once so it refreshes `~/.claude/.credentials.json`; check `"account": {"enabled": true}` in `config.json`. Local estimates keep working regardless |
 | **Config.json replaced with `.bak`** | File was corrupted (e.g. power loss mid-write) | The original is preserved as `config.json.bak`; defaults are used. Edit `config.json` to restore custom budgets |

@@ -97,6 +97,7 @@ matrix check.  Requires `pip install pytest pytest-cov` (done automatically by
 | OS | Windows 10 (1903+) / Windows 11 |
 | Python | 3.8+ with `tkinter` (use the official [python.org](https://www.python.org/downloads/) installer) |
 | Claude Code | Any version — `~/.claude/projects/` must exist |
+| Claude Code login (optional) | Enables account sync — real `/usage` percentages via `~/.claude/.credentials.json` |
 
 ---
 
